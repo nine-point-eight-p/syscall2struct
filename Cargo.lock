@@ -59,9 +59,9 @@ checksum = "0c4b4d0bd25bd0b74681c0ad21497610ce1b7c91b1022cd21c80c6fbdd9476b0"
 
 [[package]]
 name = "bytebuffer"
-version = "2.2.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa7bfaf7cd08cacd74cdc6b521c37ac39cbc92692e5ab5c21ed5657a749b577c"
+checksum = "2618ff1f07e000264e355904bff5c0527091fcbad883ff7f71383c5428915f4b"
 dependencies = [
  "byteorder",
 ]
@@ -276,6 +276,10 @@ dependencies = [
  "convert_case",
  "syzlang-parser",
 ]
+
+[[package]]
+name = "syscall2struct-helpers"
+version = "0.1.0"
 
 [[package]]
 name = "syzlang-parser"

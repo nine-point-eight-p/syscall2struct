@@ -1,0 +1,11 @@
+[package]
+name = "syscall2struct"
+version = "0.1.0"
+edition = "2021"
+description = "Generate Rust structs from syscall definitions written in Syzlang"
+
+[dependencies]
+clap = { version = "4.5.11", features = ["derive"] }
+codegen = "0.2.0"
+convert_case = "0.6.0"
+syzlang-parser = "0.1.4"

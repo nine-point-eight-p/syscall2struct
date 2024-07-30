@@ -20,7 +20,7 @@ struct TranslateOption {
     r#const: String,
 
     /// Path to the generated project, must not exist yet
-    #[clap(long, default_value = "my-syscalls")]
+    #[clap(long, default_value = "../my-syscalls")]
     project: String,
 }
 
@@ -37,11 +37,22 @@ fn main() {
 }
 
 fn export_to_crate(path: &Path, content: &str) {
+    // Create a directory first to prevent cargo adding the crate to this workspace
+    assert!(
+        Command::new("mkdir")
+            .arg("-p")
+            .arg(path)
+            .status()
+            .expect("Failed to create project")
+            .success(),
+        "Failed to create project"
+    );
+
     assert!(
         Command::new("cargo")
-            .arg("new")
+            .current_dir(path) // Change the current directory to the project path
+            .arg("init")
             .arg("--lib")
-            .arg(path)
             .status()
             .expect("Failed to create project")
             .success(),
@@ -58,6 +69,7 @@ fn export_to_crate(path: &Path, content: &str) {
         &[
             "--git",
             "https://github.com/nine-point-eight-p/syscall2struct",
+            "syscall2struct-helpers",
         ],
     );
 

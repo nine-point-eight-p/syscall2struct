@@ -55,7 +55,7 @@ impl SyscallTranslator {
             scope.import("syscalls::raw", format!("syscall{}", arg_num).as_str());
         }
 
-        scope.import("syscall2struct", "*");
+        scope.import("syscall2struct_helpers", "*");
     }
 
     fn translate_syscall(&self, nr: usize, function: &ParserFunction) -> (Struct, Impl) {
