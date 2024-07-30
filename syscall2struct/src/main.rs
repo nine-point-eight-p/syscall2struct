@@ -63,7 +63,7 @@ fn export_to_crate(path: &Path, content: &str) {
         path,
         &["serde", "--no-default-features", "--features=derive"],
     );
-    add_dependency(path, &["syscalls"]);
+    add_dependency(path, &["syscalls", "--no-default-features"]);
     add_dependency(
         path,
         &[

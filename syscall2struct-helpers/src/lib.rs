@@ -1,3 +1,7 @@
+#![no_std]
+
+use core::marker::Sized;
+
 /// Make a syscall with context
 pub trait MakeSyscall {
     /// Syscall number
