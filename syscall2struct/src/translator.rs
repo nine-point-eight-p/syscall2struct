@@ -34,11 +34,24 @@ impl SyscallTranslator {
 
         // Generate syscall functions
         for func in self.parsed.functions() {
-            let nr = self
-                .parsed
-                .consts()
-                .find_sysno(&func.name.name, &ARCH)
-                .expect(&format!("Syscall number not found: {}", func.name.name));
+            let nr = if let Some(nr) = self.parsed.consts().find_sysno(&func.name.name, &ARCH) {
+                // Use the syscall number for the arch if available
+                nr
+            } else {
+                // Use the default syscall number if not specified
+                self.parsed
+                    .consts()
+                    .find_sysno_for_any(&func.name.name)
+                    .iter()
+                    .find_map(|c| {
+                        if c.arch.is_empty() {
+                            c.as_uint().map(|nr| nr as usize).ok()
+                        } else {
+                            None
+                        }
+                    })
+                    .expect(&format!("Syscall number not found: {}", func.name.name))
+            };
             let (s, i) = self.translate_syscall(nr, func);
             scope.push_struct(s);
             scope.push_impl(i);
