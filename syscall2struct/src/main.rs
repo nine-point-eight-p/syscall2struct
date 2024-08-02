@@ -36,71 +36,64 @@ fn main() {
     export_to_crate(project_path, &content);
 }
 
+// Generate a command and check if it's successful
+macro_rules! cmd {
+    ($cmd:expr, $($arg:expr),*; $msg:expr) => {
+        assert!(
+            Command::new($cmd)
+                $(.arg($arg))*
+                .status()
+                .expect($msg)
+                .success(),
+            $msg
+        );
+    };
+    // With working directory
+    ([$wd:expr] $cmd:expr, $($arg:expr),*; $msg:expr) => {
+        assert!(
+            Command::new($cmd)
+                .current_dir($wd)
+                $(.arg($arg))*
+                .status()
+                .expect($msg)
+                .success(),
+            $msg
+        );
+    };
+}
+
 fn export_to_crate(path: &Path, content: &str) {
     // Create a directory first to prevent cargo adding the crate to this workspace
-    assert!(
-        Command::new("mkdir")
-            .arg("-p")
-            .arg(path)
-            .status()
-            .expect("Failed to create project")
-            .success(),
-        "Failed to create project"
+    cmd!("mkdir", "-p", path.to_str().unwrap(); "Failed to create project");
+    cmd!([path] "cargo", "init", "--lib", path.to_str().unwrap(); "Failed to create project");
+
+    // Add dependencies
+    cmd!([path] "cargo", "add",
+        "serde",
+        "--no-default-features",
+        "--features=derive";
+        "Failed to add serde"
+    );
+    cmd!([path] "cargo", "add",
+        "syscalls",
+        "--no-default-features";
+        "Failed to add syscalls"
+    );
+    cmd!([path] "cargo", "add",
+        "--git", "https://github.com/nine-point-eight-p/syscall2struct",
+        "syscall2struct-helpers";
+        "Failed to add syscall2struct-helpers"
     );
 
-    assert!(
-        Command::new("cargo")
-            .current_dir(path) // Change the current directory to the project path
-            .arg("init")
-            .arg("--lib")
-            .status()
-            .expect("Failed to create project")
-            .success(),
-        "Failed to create project"
-    );
-
-    add_dependency(
-        path,
-        &["serde", "--no-default-features", "--features=derive"],
-    );
-    add_dependency(path, &["syscalls", "--no-default-features"]);
-    add_dependency(
-        path,
-        &[
-            "--git",
-            "https://github.com/nine-point-eight-p/syscall2struct",
-            "syscall2struct-helpers",
-        ],
-    );
-
+    // Export the content to the file
     let output_path = path.join("src").join("lib.rs");
     export_to_file(&output_path, content);
 
-    assert!(
-        Command::new("cargo")
-            .current_dir(path)
-            .arg("fmt")
-            .status()
-            .expect("Failed to format code")
-            .success(),
-        "Failed to format code"
-    )
+    // Format the code
+    cmd!([path] "cargo", "fmt"; "Failed to format code");
 }
 
 fn export_to_file(path: &Path, content: &str) {
     let mut file = File::create(path).unwrap();
     file.write_all(content.as_bytes()).unwrap();
-}
-
-fn add_dependency(path: &Path, args: &[&str]) {
-    assert!(
-        Command::new("cargo")
-            .current_dir(path)
-            .arg("add")
-            .args(args)
-            .status()
-            .expect("Failed to add crate")
-            .success(),
-        "Failed to add crate"
-    );
 }
