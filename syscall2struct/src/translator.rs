@@ -4,7 +4,7 @@ use codegen::{Function, Impl, Scope, Struct};
 use convert_case::{Case, Casing};
 use syzlang_parser::parser::{
     Arch, ArgOpt, ArgType, Argument, Consts, Direction, Function as ParserFunction, IdentType,
-    Parsed, Statement,
+    Parsed, Statement, Value,
 };
 
 // Currently only support RISC-V 64-bit
@@ -147,6 +147,18 @@ impl SyscallTranslator {
             ArgType::Int32 => "i32".to_string(),
             ArgType::Int64 => "i64".to_string(),
             ArgType::Intptr => "isize".to_string(),
+            // Flag
+            ArgType::Flags => {
+                let ident = arg
+                    .opts()
+                    .find_map(|opt| match opt {
+                        ArgOpt::Ident(ident) => Some(ident),
+                        _ => None,
+                    })
+                    .expect("Flag type without identifier");
+                let fake_arg = Argument::new_fake(ArgType::Ident(ident.clone()), Vec::new());
+                self.get_underlying_type(&fake_arg)
+            }
             // String
             ArgType::String | ArgType::StringConst => "str".to_string(),
             ArgType::Ident(ident) if ident.name == "filename" => "str".to_string(),
@@ -171,10 +183,18 @@ impl SyscallTranslator {
                 let ident_type = self.parsed.identifier_to_ident_type(ident).unwrap();
                 let arg_type = match ident_type {
                     IdentType::Resource => self.parsed.get_resource(ident).unwrap().arg_type(),
+                    IdentType::Flag => {
+                        let mut values = self.parsed.get_flag(ident).unwrap().args();
+                        assert!(
+                            values.all(|v| matches!(v, Value::Int(_))),
+                            "Flags with non-integer values are not supported"
+                        );
+                        &ArgType::Int64
+                    }
                     _ => unimplemented!(),
                 };
-                let fake_subarg = Argument::new_fake(arg_type.clone(), Vec::new());
-                self.get_underlying_type(&fake_subarg)
+                let fake_arg = Argument::new_fake(arg_type.clone(), Vec::new());
+                self.get_underlying_type(&fake_arg)
             }
             _ => unimplemented!("Unsupported argument type: {:?}", arg.arg_type()),
         }

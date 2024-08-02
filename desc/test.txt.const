@@ -4,3 +4,4 @@ __NR_out_ptr = riscv64:202
 __NR_simple_res = riscv64:301
 __NR_nested_res = riscv64:302
 __NR_fileop = riscv64:401
+__NR_simple_flag = riscv64:501

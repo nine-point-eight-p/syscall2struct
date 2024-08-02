@@ -7,3 +7,6 @@ out_ptr(e ptr[out, int32])
 simple_res(fd fd)
 nested_res(ffd ffd)
 fileop(name ptr[in, filename])
+simple_flag(f flags[my_flags])
+
+my_flags = 1, 2, 3
