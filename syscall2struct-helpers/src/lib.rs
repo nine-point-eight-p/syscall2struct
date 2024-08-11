@@ -32,12 +32,38 @@ impl<T> AsPtr<T> for &T {
 }
 
 /// Convert to a mutable pointer
-pub trait AsMutPtr<T> {
+pub trait AsMutPtr<T: ?Sized> {
     fn as_mut_ptr(&mut self) -> *mut T;
 }
 
 impl<T> AsMutPtr<T> for &mut T {
     fn as_mut_ptr(&mut self) -> *mut T {
         *self as *mut T
+    }
+}
+
+/// A wrapper for pointers, holding either a raw address or some owned data
+pub enum Pointer<T> {
+    /// Raw address
+    Addr(usize),
+    /// Owned data
+    Data(T),
+}
+
+impl<T> AsPtr<T> for Pointer<T> {
+    fn as_ptr(&self) -> *const T {
+        match self {
+            Pointer::Addr(addr) => *addr as *const T,
+            Pointer::Data(data) => data as *const T,
+        }
+    }
+}
+
+impl<T> AsMutPtr<T> for Pointer<T> {
+    fn as_mut_ptr(&mut self) -> *mut T {
+        match self {
+            Pointer::Addr(addr) => *addr as *mut T,
+            Pointer::Data(data) => data as *mut T,
+        }
     }
 }
