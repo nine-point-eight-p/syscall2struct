@@ -4,11 +4,14 @@ use codegen::{Function, Impl, Scope, Struct};
 use convert_case::{Case, Casing};
 use syzlang_parser::parser::{
     Arch, ArgOpt, ArgType, Argument, Consts, Direction, Function as ParserFunction, IdentType,
-    Parsed, Statement, Value,
+    Parsed, Statement,
 };
 
 // Currently only support RISC-V 64-bit
 const ARCH: Arch = Arch::Riscv64;
+
+const MAX_BUFFER_LENGTH: usize = 4096;
+const MAX_ARRAY_LENGTH: usize = 10;
 
 /// A translator that converts syscall description to Rust code
 pub struct SyscallTranslator {
@@ -18,10 +21,16 @@ pub struct SyscallTranslator {
 impl SyscallTranslator {
     /// Create a new translator from the description and constants file
     pub fn new(desc_path: &Path, const_path: &Path) -> Self {
-        let stmts = Statement::from_file(desc_path).unwrap();
+        let builtin = Statement::from_file(Path::new("desc/builtin.txt")).unwrap();
+        let desc = Statement::from_file(desc_path).unwrap();
+        let stmts = [builtin, desc].concat();
+
         let mut consts = Consts::new(Vec::new());
         consts.create_from_file(const_path).unwrap();
-        let parsed = Parsed::new(consts, stmts).unwrap();
+
+        let mut parsed = Parsed::new(consts, stmts).unwrap();
+        parsed.postprocess().unwrap();
+
         Self { parsed }
     }
 
@@ -43,13 +52,8 @@ impl SyscallTranslator {
                     .consts()
                     .find_sysno_for_any(&func.name.name)
                     .iter()
-                    .find_map(|c| {
-                        if c.arch.is_empty() {
-                            c.as_uint().map(|nr| nr as usize).ok()
-                        } else {
-                            None
-                        }
-                    })
+                    .find(|c| c.arch.is_empty())
+                    .map(|c| c.as_uint().unwrap() as usize)
                     .expect(&format!("Syscall number not found: {}", func.name.name))
             };
             let (s, i) = self.translate_syscall(nr, func);
@@ -63,11 +67,8 @@ impl SyscallTranslator {
     fn generate_import(&self, scope: &mut Scope) {
         scope.import("serde", "Serialize");
         scope.import("serde", "Deserialize");
-
-        for arg_num in 0..7 {
-            scope.import("syscalls::raw", format!("syscall{}", arg_num).as_str());
-        }
-
+        scope.import("heapless", "Vec");
+        scope.import("syscalls::raw", "*");
         scope.import("syscall2struct_helpers", "*");
     }
 
@@ -84,16 +85,13 @@ impl SyscallTranslator {
 
         // The function for impl, will be added at the end
         let mut func = Function::new("call");
-        func.ret("usize");
+        func.ret("isize");
 
-        let mut has_ref = false;
         let mut has_mut = false;
 
         for (idx, arg) in function.args().enumerate() {
             let parse_type = self.get_underlying_type(arg);
-            if parse_type.starts_with("&") {
-                has_ref = true;
-            }
+            let is_buffer = parse_type.starts_with("Vec<u8");
 
             let arg_name = arg.name.name.to_case(Case::Snake);
             let mutable = arg.arg_type().is_ptr() && arg.direction() == Direction::Out;
@@ -105,17 +103,23 @@ impl SyscallTranslator {
             let field = s.new_field(&arg_name, parse_type).vis("pub");
             if mutable {
                 field.annotation("#[serde(skip)]");
+                if is_buffer {
+                    s.field(&format!("{}_len", &arg_name), "u64").vis("pub");
+                }
             }
 
             // Generate a line for the function
             if arg.arg_type().is_ptr() {
                 if mutable {
-                    func.line(format!(
-                        "let arg{} = (&mut self.{}).as_mut_ptr();",
-                        idx, arg_name
-                    ));
+                    if is_buffer {
+                        func.line(format!(
+                            "if let(Pointer::Addr(data)) = self.{} {{ data.resize(self.{}_len as usize, 0).unwrap(); }}",
+                            idx, arg_name
+                        ));
+                    }
+                    func.line(format!("let arg{} = self.{}.as_mut_ptr();", idx, arg_name));
                 } else {
-                    func.line(format!("let arg{} = (&self.{}).as_ptr();", idx, arg_name));
+                    func.line(format!("let arg{} = self.{}.as_ptr();", idx, arg_name));
                 }
             } else {
                 func.line(format!("let arg{} = self.{};", idx, arg_name));
@@ -128,13 +132,7 @@ impl SyscallTranslator {
             syscall += format!("arg{} as usize, ", idx).as_str();
         }
         syscall += ")";
-        func.line(format!("unsafe {{ {} }}", syscall));
-
-        // Add lifetime generics if needed
-        if has_ref {
-            s.generic("'a");
-            i.generic("'a").target_generic("'a");
-        }
+        func.line(format!("unsafe {{ {} as isize }}", syscall));
 
         // Select trait
         if has_mut {
@@ -155,55 +153,40 @@ impl SyscallTranslator {
         let arg_type = arg.arg_type();
         match arg_type {
             // Integer
-            ArgType::Int8 => "i8".to_string(),
-            ArgType::Int16 => "i16".to_string(),
-            ArgType::Int32 => "i32".to_string(),
-            ArgType::Int64 => "i64".to_string(),
-            ArgType::Intptr => "isize".to_string(),
-            // Flag
-            ArgType::Flags => {
-                let ident = arg
-                    .opts()
-                    .find_map(|opt| match opt {
-                        ArgOpt::Ident(ident) => Some(ident),
-                        _ => None,
-                    })
-                    .expect("Flag type without identifier");
-                let fake_arg = Argument::new_fake(ArgType::Ident(ident.clone()), Vec::new());
-                self.get_underlying_type(&fake_arg)
-            }
+            ArgType::Int8
+            | ArgType::Int16
+            | ArgType::Int32
+            | ArgType::Int64
+            | ArgType::Intptr
+            | ArgType::Flags => "u64".to_string(),
             // String
-            ArgType::String | ArgType::StringConst => "str".to_string(),
-            ArgType::Ident(ident) if ident.name == "filename" => "str".to_string(),
+            ArgType::String | ArgType::StringNoz => format!("Vec<u8, {}>", MAX_BUFFER_LENGTH),
+            // Array
+            ArgType::Array => {
+                let subarg = ArgOpt::get_subarg(&arg.opts).unwrap();
+                if subarg.argtype == ArgType::Int8 {
+                    format!("Vec<u8, {}>", MAX_ARRAY_LENGTH)
+                } else {
+                    let ty = self.get_underlying_type(&subarg);
+                    format!("Vec<{}, {}>", ty, MAX_ARRAY_LENGTH)
+                }
+            }
             // Pointer
             ArgType::Ptr | ArgType::Ptr64 => {
-                let subarg =
-                    ArgOpt::get_subarg(&arg.opts).expect("Pointer type without underlying type");
+                let subarg = ArgOpt::get_subarg(&arg.opts).unwrap();
                 assert!(
                     !subarg.arg_type().is_ptr(),
                     "Nested pointer type is not supported"
                 );
 
                 let ty = self.get_underlying_type(&subarg);
-                if ty == "str" || ty == "[u8]" {
-                    format!("&'a {}", ty) // Hold reference for dynamic-size types
-                } else {
-                    ty // Hold value for fixed-size types
-                }
+                format!("Pointer<{}>", ty)
             }
             // Custom type
             ArgType::Ident(ident) => {
                 let ident_type = self.parsed.identifier_to_ident_type(ident).unwrap();
                 let arg_type = match ident_type {
                     IdentType::Resource => self.parsed.get_resource(ident).unwrap().arg_type(),
-                    IdentType::Flag => {
-                        let mut values = self.parsed.get_flag(ident).unwrap().args();
-                        assert!(
-                            values.all(|v| matches!(v, Value::Int(_))),
-                            "Flags with non-integer values are not supported"
-                        );
-                        &ArgType::Int64
-                    }
                     _ => unimplemented!(),
                 };
                 let fake_arg = Argument::new_fake(arg_type.clone(), Vec::new());

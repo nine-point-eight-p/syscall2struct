@@ -80,6 +80,11 @@ fn export_to_crate(path: &Path, content: &str) {
         "Failed to add syscalls"
     );
     cmd!([path] "cargo", "add",
+        "heapless",
+        "--features", "serde";
+        "Failed to add heapless"
+    );
+    cmd!([path] "cargo", "add",
         "--git", "https://github.com/nine-point-eight-p/syscall2struct",
         "syscall2struct-helpers";
         "Failed to add syscall2struct-helpers"

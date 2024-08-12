@@ -3,7 +3,7 @@
 use core::marker::Sized;
 
 use enum_index_derive::EnumIndex;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Make a syscall with context
 pub trait MakeSyscall {
