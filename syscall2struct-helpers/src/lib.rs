@@ -3,6 +3,7 @@
 use core::marker::Sized;
 
 use enum_index_derive::EnumIndex;
+use serde::{Serialize, Deserialize};
 
 /// Make a syscall with context
 pub trait MakeSyscall {
@@ -45,7 +46,7 @@ impl<T> AsMutPtr<T> for &mut T {
 }
 
 /// A wrapper for pointers, holding either a raw address or some owned data
-#[derive(EnumIndex)]
+#[derive(Serialize, Deserialize, EnumIndex)]
 pub enum Pointer<T> {
     /// Raw address
     Addr(usize),
