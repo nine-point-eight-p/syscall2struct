@@ -11,7 +11,7 @@ pub trait MakeSyscall {
     const NR: usize;
 
     /// Call syscall
-    fn call(&self) -> usize;
+    fn call(&self) -> isize;
 }
 
 /// Make a syscall with context, mutable to receive data
@@ -20,7 +20,7 @@ pub trait MakeSyscallMut {
     const NR: usize;
 
     /// Call syscall
-    fn call(&mut self) -> usize;
+    fn call(&mut self) -> isize;
 }
 
 /// Convert to a pointer
@@ -46,7 +46,7 @@ impl<T> AsMutPtr<T> for &mut T {
 }
 
 /// A wrapper for pointers, holding either a raw address or some owned data
-#[derive(Serialize, Deserialize, EnumIndex)]
+#[derive(Debug, Serialize, Deserialize, EnumIndex)]
 pub enum Pointer<T> {
     /// Raw address
     Addr(usize),
