@@ -2,6 +2,8 @@
 
 use core::marker::Sized;
 
+use enum_index_derive::EnumIndex;
+
 /// Make a syscall with context
 pub trait MakeSyscall {
     /// Syscall number
@@ -43,6 +45,7 @@ impl<T> AsMutPtr<T> for &mut T {
 }
 
 /// A wrapper for pointers, holding either a raw address or some owned data
+#[derive(EnumIndex)]
 pub enum Pointer<T> {
     /// Raw address
     Addr(usize),
@@ -65,5 +68,21 @@ impl<T> AsMutPtr<T> for Pointer<T> {
             Pointer::Addr(addr) => *addr as *mut T,
             Pointer::Data(data) => data as *mut T,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use enum_index::EnumIndex;
+
+    #[test]
+    fn test_pointer_index() {
+        let addr: Pointer<i32> = Pointer::Addr(0x1234);
+        let data = Pointer::Data(0x1234);
+
+        assert_eq!(addr.enum_index(), 0);
+        assert_eq!(data.enum_index(), 1);
     }
 }
