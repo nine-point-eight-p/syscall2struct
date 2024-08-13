@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Make a syscall with context
 pub trait MakeSyscall {
     /// Syscall number
-    const NR: usize;
+    const NR: i32;
 
     /// Call syscall
     fn call(&self) -> isize;
@@ -17,7 +17,7 @@ pub trait MakeSyscall {
 /// Make a syscall with context, mutable to receive data
 pub trait MakeSyscallMut {
     /// Syscall number
-    const NR: usize;
+    const NR: i32;
 
     /// Call syscall
     fn call(&mut self) -> isize;
