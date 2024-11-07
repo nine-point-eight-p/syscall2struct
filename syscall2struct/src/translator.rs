@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use codegen::{Function, Impl, Scope, Struct};
+use codegen::{Scope, Struct};
 use convert_case::{Case, Casing};
 use syzlang_parser::parser::{
     Arch, ArgOpt, ArgType, Argument, Consts, Direction, Function as ParserFunction, IdentType,
@@ -41,112 +41,75 @@ impl SyscallTranslator {
         // Generate imports
         self.generate_import(&mut scope);
 
-        // Generate syscall functions
+        // Generate syscall structs
         for func in self.parsed.functions() {
-            let nr = if let Some(nr) = self.parsed.consts().find_sysno(&func.name.name, &ARCH) {
+            let nr = match self.parsed.consts().find_sysno(&func.name.name, &ARCH) {
                 // Use the syscall number for the arch if available
-                nr
-            } else {
+                Some(nr) => nr,
                 // Use the default syscall number if not specified
-                self.parsed
+                None => self
+                    .parsed
                     .consts()
                     .find_sysno_for_any(&func.name.name)
                     .iter()
                     .find(|c| c.arch.is_empty())
                     .map(|c| c.as_uint().unwrap() as usize)
-                    .expect(&format!("Syscall number not found: {}", func.name.name))
+                    .expect(&format!("Syscall number not found: {}", func.name.name)),
             };
-            let (s, i) = self.translate_syscall(nr, func);
-            scope.push_struct(s);
-            scope.push_impl(i);
+            scope.push_struct(self.translate_syscall(nr, func));
         }
 
-        format!("#![no_std]\n{}", scope.to_string())
+        scope.to_string()
     }
 
     fn generate_import(&self, scope: &mut Scope) {
-        scope.import("serde", "Serialize");
         scope.import("serde", "Deserialize");
         scope.import("heapless", "Vec");
         scope.import("syscalls::raw", "*");
+        scope.import("syscall2struct_derive", "*");
         scope.import("syscall2struct_helpers", "*");
+        scope.import("uuid", "Uuid");
     }
 
-    fn translate_syscall(&self, nr: usize, function: &ParserFunction) -> (Struct, Impl) {
+    fn translate_syscall(&self, nr: usize, function: &ParserFunction) -> Struct {
         let struct_name = function.name.name.to_case(Case::Pascal);
 
         let mut s = Struct::new(&struct_name);
         s.vis("pub");
-        s.derive("Debug").derive("Serialize").derive("Deserialize");
+        s.derive("Debug").derive("Deserialize");
+        s.attr(format!("sysno({nr})"));
 
-        let mut i = Impl::new(struct_name);
         // Select trait after we decide whether the syscall has mutable arguments
-        i.associate_const("NR", "usize", nr.to_string(), "");
-
-        // The function for impl, will be added at the end
-        let mut func = Function::new("call");
-        func.ret("isize");
-
         let mut has_mut = false;
 
-        for (idx, arg) in function.args().enumerate() {
+        // Generate a field for each argument
+        for arg in function.args() {
             let parse_type = self.get_underlying_type(arg);
-            let is_buffer = parse_type.starts_with("Vec<u8");
-
             let arg_name = arg.name.name.to_case(Case::Snake);
-            let mutable = arg.arg_type().is_ptr() && arg.direction() == Direction::Out;
-            if mutable {
-                has_mut = true;
-            }
 
-            // Generate a struct field
             let field = s.new_field(&arg_name, parse_type).vis("pub");
-            if mutable {
-                field.annotation("#[serde(skip)]");
-                if is_buffer {
-                    s.field(&format!("{}_len", &arg_name), "u64").vis("pub");
-                }
-            }
-
-            // Generate a line for the function
             if arg.arg_type().is_ptr() {
-                if mutable {
-                    if is_buffer {
-                        func.line(format!(
-                            "if let(Pointer::Addr(data)) = self.{} {{ data.resize(self.{}_len as usize, 0).unwrap(); }}",
-                            idx, arg_name
-                        ));
-                    }
-                    func.line(format!("let arg{} = self.{}.as_mut_ptr();", idx, arg_name));
+                if arg.direction() == Direction::In {
+                    field.annotation("#[in_ptr]");
                 } else {
-                    func.line(format!("let arg{} = self.{}.as_ptr();", idx, arg_name));
+                    field.annotation("#[out_ptr]");
+                    has_mut = true;
                 }
-            } else {
-                func.line(format!("let arg{} = self.{};", idx, arg_name));
             }
         }
-
-        // Make syscall
-        let mut syscall = format!("syscall{}({}.into(), ", function.args().len(), nr);
-        for idx in 0..function.args().len() {
-            syscall += format!("arg{} as usize, ", idx).as_str();
+        // Generate a field for return value (if any)
+        if function.output != ArgType::Void {
+            s.field("id", "Uuid").vis("pub").allow("#[ret_val]");
         }
-        syscall += ")";
-        func.line(format!("unsafe {{ {} as isize }}", syscall));
 
         // Select trait
         if has_mut {
-            i.impl_trait("MakeSyscallMut");
-            func.arg_mut_self();
+            s.derive("MakeSyscallMut");
         } else {
-            i.impl_trait("MakeSyscall");
-            func.arg_ref_self();
+            s.derive("MakeSyscall");
         }
 
-        // Add function to impl
-        i.push_fn(func);
-
-        (s, i)
+        s
     }
 
     fn get_underlying_type(&self, arg: &Argument) -> String {
@@ -182,14 +145,14 @@ impl SyscallTranslator {
                 let ty = self.get_underlying_type(&subarg);
                 format!("Pointer<{}>", ty)
             }
-            // Custom type
+            // Resource type
             ArgType::Ident(ident) => {
                 let ident_type = self.parsed.identifier_to_ident_type(ident).unwrap();
                 let arg_type = match ident_type {
-                    IdentType::Resource => self.parsed.get_resource(ident).unwrap().arg_type(),
-                    _ => unimplemented!(),
+                    IdentType::Resource => self.parsed.resource_to_basic_type(ident).unwrap(),
+                    _ => unimplemented!("Unsupported identifier type: {:?}", ident_type),
                 };
-                let fake_arg = Argument::new_fake(arg_type.clone(), Vec::new());
+                let fake_arg = Argument::new_fake(arg_type, Vec::new());
                 self.get_underlying_type(&fake_arg)
             }
             _ => unimplemented!("Unsupported argument type: {:?}", arg.arg_type()),
