@@ -3,7 +3,14 @@ name = "syscall2struct-helpers"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["heapless"]
+heapless = ["dep:heapless"]
+alloc = []
+
 [dependencies]
 enum_index = { git = "https://github.com/nine-point-eight-p/enum_index", branch = "no_std_support" }
 enum_index_derive = { git = "https://github.com/nine-point-eight-p/enum_index", branch = "no_std_support" }
+heapless = { version = "0.8.0", optional = true }
 serde = { version = "1.0.206", default-features = false, features = ["derive"] }
+uuid = { version = "1.10.0", default-features = false, features = ["serde"] }
